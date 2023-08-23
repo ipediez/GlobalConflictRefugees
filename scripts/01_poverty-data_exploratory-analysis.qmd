@@ -1,0 +1,143 @@
+---
+title: "Poverty - world bank data"
+subtitle: "Exploratory analysis"
+author: "Irene Pérez-Díez"
+format:
+  html:
+    self-contained: true
+    theme: minty
+    smooth-scroll: true
+    code-fold: true
+    code-summary: "Show the code"
+    fig-format: svg
+    title-block-banner: true
+editor: visual
+---
+
+```{r libraries, include=FALSE}
+library(here)
+library(tidyverse)
+library(ggplot2)
+library(geojsonio)
+library(broom)
+```
+
+## World Bank Data - Poverty Index
+
+Data in this section comes from the World Bank, Poverty and Inequality Platform. Data was compiled from official government sources or computed by Wolrd Bank staff using national (i.e. country-specific) poverty lines. Data was retrieved on 21st August 2023 from [The World Bank website](https://data.worldbank.org/indicator/SI.POV.NAHC?view=map&year=2022) under the CC-BY 4.0 License.
+
+I downloaded three files from the source:
+
+-   A file containing the **poverty index** (poverty headcount ratio at national poverty lines (% of population)) by country and year, from 1960 to 2022. The first for rows of the file were not part of the data table, so I removed them before loading the file.
+
+-   A file containing country metadata, including:
+
+    -   Country code
+
+    -   Region
+
+    -   Income group
+
+    -   Special notes, such as information about the reporting periods
+
+    -   Name of the country in the data table
+
+-   A file containing metadata about the index
+
+```{r read_data, include=FALSE}
+
+data <- read_csv(
+  here("data/poverty_world-bank/API_SI.POV.NAHC_DS2_en_csv_v2_5728906.csv")
+  )
+metadata_country <- read_csv(
+  here("data/poverty_world-bank/Metadata_Country_API_SI.POV.NAHC_DS2_en_csv_v2_5728906.csv")
+  )
+```
+
+### Poverty index
+
+Before starting our analysis, let's define the index we are studying.
+
+The **poverty index** is the Poverty headcount ratio at national poverty lines (% of population). This is the percentage of the population living below the national poverty line(s). National estimates are based on population-weighted subgroup estimates from household surveys. For economies for which the data are from EU-SILC, the reported year is the income reference year, which is the year before the survey year.
+
+Although data description was promising, when first exploring the data an issue about missing values quickly raised to my attention. From 1960 to 1984, all data entries were missing. Therefore, no data is registered before 1985, even if those years appear in the table. I removed those empty years from the table, alongside the columns holding information about the indicator itself.
+
+Furthermore, some extra "country" entries had been added by World Bank staff, including combinations of several countries by area, i.e. "Africa Eastern and Southeastern" including 26 countries in a single code. As I was interested in country-level information, I removed those rows.
+
+```{r clean_data}
+metadata_country <- metadata_country %>%
+  drop_na(Region)
+
+data <- data %>%
+  select(c("Country Code", as.character(1985:2022))) %>%
+  filter(`Country Code` %in% metadata_country$`Country Code`) %>%
+  column_to_rownames(var = "Country Code")
+```
+
+```{r missing_values, include=FALSE}
+missing_values <- data %>%
+  rowwise() %>%
+  mutate(na_values=sum(is.na(c_across()))) %>%
+  pull(na_values)
+
+analyzed_years <- ncol(data)
+map_missing_data <- tibble(rownames(data), missing_values)
+colnames(map_missing_data) <- c("ISO_3", "Freq")
+bar_data <- data.frame(table(missing_values))
+```
+
+```{r missing_barplot, dpi=300}
+
+ggplot(bar_data, aes(x=missing_values, y=Freq)) +
+  geom_bar(stat = "identity", fill = "#808000") +
+  geom_text(aes(label=Freq), vjust = -0.3) +
+  theme_minimal() +
+  labs(
+    y = "Missing values",
+    x = "Frequency",
+    title = "Missing values by country - 1985 to 2022",
+    subtitle = "World Bank - Poverty Index",
+    caption = "Data: World Bank | Creation: Irene Pérez-Díez"
+  )
+```
+
+As the bar plot shows, over 27% of countries do not have any value registered for the poverty index in the whole time series. Let's see how these values are distributed over the world geography using a choropleth map.
+
+```{r}
+#| output: false
+world_geo <- sf::st_read(here("data/spatial/world.geojson"))
+
+missing_plot <- world_geo %>%
+  left_join(map_missing_data, by=c("ISO_A3"="ISO_3")) %>%
+  mutate(Freq = 38 - Freq)
+```
+
+```{r, dpi=300, fig.height=20, fig.width=50}
+#| column: screen
+ggplot() +
+  geom_sf(data = missing_plot, aes(fill = Freq), size = 0, alpha = 0.9) +
+  scale_fill_viridis_c(breaks=c(0,5,10, 20, 30, 40), name="Years registered", guide = guide_legend( keyheight = unit(6, units = "mm"), keywidth=unit(18, units = "mm"), label.position = "bottom", title.position = 'top', nrow=1) ) +
+  labs(
+    title = "World Bank - Poverty Index",
+    subtitle = "Number of years registered by country",
+    caption = "Data: World Bank | Creation: Irene Pérez-Díez"
+  ) + 
+  theme_void() +
+  theme(
+    text = element_text(color="#514A44"),
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    legend.background = element_rect(fill = "white", color = NA),
+    
+    
+
+    plot.title = element_text(size= 36, hjust=0.01, color = "#514A44", margin = margin(b = -0.1, t = 0.4, l = 2, unit = "cm")),
+    plot.subtitle = element_text(size= 30, hjust=0.01, color = "#514A44", margin = margin(b = -0.1, t = 0.43, l = 2, unit = "cm")),
+    plot.caption = element_text( size=24, color = "#514A44", margin = margin(b = 0.3, r=-99, unit = "cm") ),
+    
+    legend.position = c(0.06, 0.09),
+    legend.text = element_text(size=24, color = "#514A44"),
+    legend.title = element_text(size=24, color = "#514A44")
+  ) +
+  coord_sf()
+```
