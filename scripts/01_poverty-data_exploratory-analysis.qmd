@@ -17,9 +17,10 @@ editor: visual
 ```{r libraries, include=FALSE}
 library(here)
 library(tidyverse)
+library(reshape2)
 library(ggplot2)
 library(geojsonio)
-library(broom)
+library(gganimate)
 ```
 
 ## World Bank Data - Poverty Index
@@ -140,4 +141,55 @@ ggplot() +
     legend.title = element_text(size=24, color = "#514A44")
   ) +
   coord_sf()
+```
+
+After exploring the missing data, it's time to visualize de data itself. As the data includes a time-series by year per country, it can be plotted as an animated map.
+
+```{r, dpi=300, fig.height=20, fig.width=50}
+
+map_data <- data %>%
+  rownames_to_column(var="ISO_3") %>%
+  reshape2::melt(id.vars = "ISO_3") %>%
+  rename("year"="variable") %>%
+  mutate(year=as.numeric(year))
+
+map_plot <- world_geo %>%
+  left_join(map_data, by=c("ISO_A3"="ISO_3"))
+
+#| column: screen
+map <- ggplot() +
+  geom_sf(data = map_plot, aes(fill = value, group=year), size = 0, alpha = 0.9) + 
+  scale_fill_viridis_c(breaks=c(0,15,20, 25, 30, 50, 70, 100), name="Years registered") +
+  labs(
+    title = "World Bank - Poverty Index",
+    caption = "Data: World Bank | Creation: Irene Pérez-Díez"
+  ) + 
+  theme_void() +
+  theme(
+    text = element_text(color="#514A44"),
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    legend.background = element_rect(fill = "white", color = NA),
+    
+    
+
+    plot.title = element_text(size= 36, hjust=0.01, color = "#514A44", margin = margin(b = -0.1, t = 0.4, l = 2, unit = "cm")),
+    plot.subtitle = element_text(size= 30, hjust=0.01, color = "#514A44", margin = margin(b = -0.1, t = 0.43, l = 2, unit = "cm")),
+    plot.caption = element_text( size=24, color = "#514A44", margin = margin(b = 0.3, r=-99, unit = "cm") ),
+    
+    legend.position = c(0.06, 0.09),
+    legend.text = element_text(size=24, color = "#514A44"),
+    legend.title = element_text(size=24, color = "#514A44")
+  ) +
+    coord_sf()
+
+map_with_animation <- map +
+  transition_time(year) +
+  labs(subtitle = "Year: {frame_time}")
+
+num_years <- max(as.numeric(map_data$year)) - min(map_data$year) + 1
+animate(map_with_animation, nframes = num_years)
+
+# Error due to a bug: https://github.com/thomasp85/gganimate/issues/479
+# Possible solution until bug solved: https://stackoverflow.com/questions/75979821/error-arguments-have-different-crs-in-gganimate
 ```
