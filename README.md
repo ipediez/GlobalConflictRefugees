@@ -4,19 +4,19 @@ This is an on-going personal project where I plan to combine different datasets 
 
 ## Ongoing
 
--   Exploratory analysis of Poverty index
+-   Exploratory analysis of UNCHR dataset
 
 ## TO-DO
 
 -   [ ] Exploratory analysis of UCDP conflict data
 -   [ ] Decide whether to scrap/include other confict datasets
 -   [ ] Exploratory analysis of Water scarcity
--   [ ] Exploratory analysis of UNCHR dataset
 
 ## Done
 
 -   [x] Data search
 -   [x] Data download
+-   [x] Exploratory analysis: Poverty index
 
 ## Data sources
  
