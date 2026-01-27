@@ -1,0 +1,507 @@
+---
+title: "UNHCR Refugee Data"
+subtitle: "Exploratory analysis"
+author: "Irene Pérez-Díez"
+format:
+  html:
+    self-contained: true
+    theme: minty
+    smooth-scroll: true
+    code-fold: true
+    code-summary: "Show the code"
+    fig-format: svg
+    title-block-banner: true
+editor: visual
+---
+
+```{r libraries, include=FALSE}
+library(here)
+library(tidyverse)
+library(refugees)
+library(ggplot2)
+library(plotly)
+library(geojsonio)
+library(scales)
+```
+
+## UNHCR Refugee Population Statistics
+
+Data in this section comes from the United Nations High Commissioner for Refugees (UNHCR) Refugee Data Finder, accessed through the `refugees` R package. The package provides data on forcibly displaced populations, including refugees, asylum-seekers, internally displaced people (IDPs), and stateless persons spanning over 70 years of data collection.
+
+The `refugees` package includes several datasets:
+
+-   **population**: Forcibly displaced and stateless persons by year and country pairs
+-   **flows**: Numbers of people forced to flee annually since 1962
+-   **asylum_applications**: Asylum application data by procedure and application type
+-   **asylum_decisions**: Asylum outcomes (recognized, rejected, closed)
+-   **demographics**: Demographic disaggregation by age and sex
+-   **solutions**: Durable solutions (repatriation, resettlement)
+-   **idmc**: Internal Displacement Monitoring Centre data on conflict-induced IDPs
+-   **unrwa**: Palestine refugees under UNRWA mandate
+
+More information: [UNHCR Refugee Data Finder](https://www.unhcr.org/refugee-statistics/)
+
+## Dataset Overview
+
+First, I'll explore the structure of the main datasets available in the package.
+
+### Population Dataset
+
+The `population` dataset is the core dataset containing refugee counts by origin and asylum country pairs.
+
+```{r explore_population}
+glimpse(population)
+```
+
+```{r population_summary}
+cat("Population dataset dimensions:", nrow(population), "rows x", ncol(population), "columns\n")
+cat("Year range:", min(population$year), "-", max(population$year), "\n")
+cat("Number of unique origin countries:", n_distinct(population$coo_name), "\n")
+cat("Number of unique asylum countries:", n_distinct(population$coa_name), "\n")
+```
+
+### Flows Dataset
+
+The `flows` dataset tracks annual displacement flows.
+
+```{r explore_flows}
+glimpse(flows)
+```
+
+```{r flows_summary}
+cat("Flows dataset dimensions:", nrow(flows), "rows x", ncol(flows), "columns\n")
+cat("Year range:", min(flows$year), "-", max(flows$year), "\n")
+```
+
+## Variable Documentation
+
+Let's document the key variables in the population dataset:
+
+```{r variable_docs}
+population_vars <- tibble(
+  Variable = c("year", "coo_name", "coo", "coo_iso", "coa_name", "coa", "coa_iso",
+               "refugees", "asylum_seekers", "returned_refugees", "idps",
+               "returned_idps", "stateless", "ooc", "oip", "hst"),
+  Description = c(
+    "Year of data",
+    "Country of origin (full name)",
+    "Country of origin (UNHCR code)",
+    "Country of origin (ISO 3-letter code)",
+    "Country of asylum (full name)",
+    "Country of asylum (UNHCR code)",
+    "Country of asylum (ISO 3-letter code)",
+    "Number of refugees",
+    "Number of asylum seekers",
+    "Returned refugees",
+    "Internally displaced persons",
+    "Returned IDPs",
+    "Stateless persons",
+    "Others of concern",
+    "Other people in need of international protection",
+    "Host community"
+  )
+)
+
+knitr::kable(population_vars, caption = "Population dataset variables")
+```
+
+## Temporal Coverage Analysis
+
+### Data availability over time
+
+```{r temporal_coverage}
+yearly_coverage <- population %>%
+  group_by(year) %>%
+  summarise(
+    n_records = n(),
+    n_origins = n_distinct(coo_name),
+    n_asylums = n_distinct(coa_name),
+    total_refugees = sum(refugees, na.rm = TRUE),
+    total_asylum_seekers = sum(asylum_seekers, na.rm = TRUE),
+    total_idps = sum(idps, na.rm = TRUE)
+  )
+
+plot_ly(yearly_coverage, x = ~year, y = ~n_records, type = "scatter", mode = "lines+markers",
+        line = list(color = "#2c7fb8", width = 2),
+        marker = list(color = "#2c7fb8", size = 6),
+        hovertemplate = "Year: %{x}<br>Records: %{y:,}<extra></extra>") %>%
+  layout(
+    title = list(text = "UNHCR Data Records Over Time<br><sup>Number of country-pair records per year</sup>"),
+    xaxis = list(title = "Year"),
+    yaxis = list(title = "Number of records"),
+    annotations = list(
+      list(x = 1, y = -0.1, text = "Data: UNHCR | Plot: Irene Pérez-Díez",
+           showarrow = FALSE, xref = "paper", yref = "paper",
+           xanchor = "right", font = list(size = 10, color = "gray"))
+    )
+  )
+```
+
+### Total displaced persons over time
+
+```{r displaced_over_time}
+displacement_trends <- yearly_coverage %>%
+  select(year, total_refugees, total_asylum_seekers, total_idps) %>%
+  pivot_longer(cols = -year, names_to = "category", values_to = "count") %>%
+  mutate(
+    category = case_when(
+      category == "total_refugees" ~ "Refugees",
+      category == "total_asylum_seekers" ~ "Asylum Seekers",
+      category == "total_idps" ~ "IDPs"
+    ),
+    count_millions = count / 1e6
+  )
+
+colors <- c("Refugees" = "#e41a1c", "Asylum Seekers" = "#377eb8", "IDPs" = "#4daf4a")
+
+plot_ly(displacement_trends, x = ~year, y = ~count_millions, color = ~category,
+        colors = colors, type = "scatter", mode = "lines",
+        line = list(width = 2),
+        hovertemplate = "Year: %{x}<br>%{y:.2f}M<extra>%{fullData.name}</extra>") %>%
+  layout(
+    title = list(text = "Global Displacement Trends<br><sup>Millions of displaced persons by category</sup>"),
+    xaxis = list(title = "Year"),
+    yaxis = list(title = "Persons (millions)"),
+    legend = list(orientation = "h", y = -0.15),
+    annotations = list(
+      list(x = 1, y = -0.2, text = "Data: UNHCR | Plot: Irene Pérez-Díez",
+           showarrow = FALSE, xref = "paper", yref = "paper",
+           xanchor = "right", font = list(size = 10, color = "gray"))
+    )
+  )
+```
+
+## Geographic Coverage Analysis
+
+### Missing data by country of origin
+
+```{r origin_coverage}
+origin_coverage <- population %>%
+  filter(year >= 1990) %>%
+  group_by(coo_iso) %>%
+  summarise(
+    years_with_data = n_distinct(year),
+    total_years = n_distinct(population$year[population$year >= 1990])
+  ) %>%
+  mutate(coverage_pct = years_with_data / total_years * 100)
+
+plot_ly(origin_coverage, x = ~coverage_pct, type = "histogram",
+        marker = list(color = "#808000", line = list(color = "white", width = 1)),
+        xbins = list(size = 10),
+        hovertemplate = "Coverage: %{x}%<br>Countries: %{y}<extra></extra>") %>%
+  layout(
+    title = list(text = "Data Coverage by Country of Origin (1990-present)<br><sup>Percentage of years with recorded data</sup>"),
+    xaxis = list(title = "Coverage (%)"),
+    yaxis = list(title = "Number of countries"),
+    annotations = list(
+      list(x = 1, y = -0.15, text = "Data: UNHCR | Plot: Irene Pérez-Díez",
+           showarrow = FALSE, xref = "paper", yref = "paper",
+           xanchor = "right", font = list(size = 10, color = "gray"))
+    )
+  )
+```
+
+### Geographic visualization of refugee origins
+
+```{r load_geodata}
+#| output: false
+world_geo <- sf::st_read(here("data/spatial/world.geojson"))
+```
+
+```{r origin_map, dpi=300, fig.height=20, fig.width=50}
+#| column: screen
+latest_year <- max(population$year)
+
+refugees_by_origin <- population %>%
+  filter(year == latest_year) %>%
+  group_by(coo_iso) %>%
+  summarise(total_refugees = sum(refugees, na.rm = TRUE)) %>%
+  filter(!is.na(coo_iso))
+
+origin_map_data <- world_geo %>%
+  left_join(refugees_by_origin, by = c("ISO_A3" = "coo_iso"))
+
+ggplot() +
+  geom_sf(data = origin_map_data, aes(fill = total_refugees / 1e6), size = 0, alpha = 0.9) +
+  scale_fill_viridis_c(
+    option = "inferno",
+    trans = "log10",
+    breaks = c(0.001, 0.01, 0.1, 1, 10),
+    labels = c("1K", "10K", "100K", "1M", "10M"),
+    na.value = "grey90",
+    name = "Refugees (log scale)",
+    guide = guide_legend(keyheight = unit(6, units = "mm"),
+                         keywidth = unit(18, units = "mm"),
+                         label.position = "bottom",
+                         title.position = 'top', nrow = 1)
+  ) +
+  labs(
+    title = paste("Refugee Population by Country of Origin -", latest_year),
+    subtitle = "Total number of refugees originating from each country",
+    caption = "Data: UNHCR | Plot: Irene Pérez-Díez"
+  ) +
+  theme_void() +
+  theme(
+    text = element_text(color = "#514A44"),
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    legend.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(size = 36, hjust = 0.01, color = "#514A44",
+                              margin = margin(b = -0.1, t = 0.4, l = 2, unit = "cm")),
+    plot.subtitle = element_text(size = 30, hjust = 0.01, color = "#514A44",
+                                  margin = margin(b = -0.1, t = 0.43, l = 2, unit = "cm")),
+    plot.caption = element_text(size = 24, color = "#514A44",
+                                margin = margin(b = 0.3, r = -99, unit = "cm")),
+    legend.position = c(0.06, 0.09),
+    legend.text = element_text(size = 24, color = "#514A44"),
+    legend.title = element_text(size = 24, color = "#514A44")
+  ) +
+  coord_sf()
+```
+
+## Top Origin and Destination Countries
+
+### Top 10 refugee origin countries over time
+
+```{r top_origins}
+top_origins <- population %>%
+  group_by(coo_name) %>%
+  summarise(total = sum(refugees, na.rm = TRUE)) %>%
+  slice_max(total, n = 10) %>%
+  pull(coo_name)
+
+origin_timeseries <- population %>%
+  filter(coo_name %in% top_origins) %>%
+  group_by(year, coo_name) %>%
+  summarise(refugees = sum(refugees, na.rm = TRUE), .groups = "drop") %>%
+  mutate(refugees_millions = refugees / 1e6)
+
+plot_ly(origin_timeseries, x = ~year, y = ~refugees_millions, color = ~coo_name,
+        type = "scatter", mode = "lines", line = list(width = 2),
+        hovertemplate = "Year: %{x}<br>Refugees: %{y:.2f}M<extra>%{fullData.name}</extra>") %>%
+  layout(
+    title = list(text = "Top 10 Refugee Origin Countries Over Time<br><sup>Total refugees by country of origin</sup>"),
+    xaxis = list(title = "Year"),
+    yaxis = list(title = "Refugees (millions)"),
+    legend = list(title = list(text = "Country of Origin")),
+    annotations = list(
+      list(x = 1, y = -0.1, text = "Data: UNHCR | Plot: Irene Pérez-Díez",
+           showarrow = FALSE, xref = "paper", yref = "paper",
+           xanchor = "right", font = list(size = 10, color = "gray"))
+    )
+  )
+```
+
+### Top 10 asylum countries (destinations)
+
+```{r top_destinations}
+top_destinations <- population %>%
+  group_by(coa_name) %>%
+  summarise(total = sum(refugees, na.rm = TRUE)) %>%
+  slice_max(total, n = 10) %>%
+  pull(coa_name)
+
+destination_timeseries <- population %>%
+  filter(coa_name %in% top_destinations) %>%
+  group_by(year, coa_name) %>%
+  summarise(refugees = sum(refugees, na.rm = TRUE), .groups = "drop") %>%
+  mutate(refugees_millions = refugees / 1e6)
+
+plot_ly(destination_timeseries, x = ~year, y = ~refugees_millions, color = ~coa_name,
+        type = "scatter", mode = "lines", line = list(width = 2),
+        hovertemplate = "Year: %{x}<br>Refugees: %{y:.2f}M<extra>%{fullData.name}</extra>") %>%
+  layout(
+    title = list(text = "Top 10 Refugee Asylum Countries Over Time<br><sup>Total refugees hosted by country</sup>"),
+    xaxis = list(title = "Year"),
+    yaxis = list(title = "Refugees (millions)"),
+    legend = list(title = list(text = "Country of Asylum")),
+    annotations = list(
+      list(x = 1, y = -0.1, text = "Data: UNHCR | Plot: Irene Pérez-Díez",
+           showarrow = FALSE, xref = "paper", yref = "paper",
+           xanchor = "right", font = list(size = 10, color = "gray"))
+    )
+  )
+```
+
+## Refugee Origins Over Time: Small Multiples
+
+An animated map was too heavy workload for my computer. Instead, we use a faceted approach showing maps at key intervals to visualize how refugee origins have shifted over the decades.
+
+```{r small_multiples_map, dpi=300, fig.height=12, fig.width=16}
+#| column: screen
+selected_years <- c(1990, 2000, 2010, 2015, 2020, max(population$year))
+
+refugees_selected_years <- population %>%
+  filter(year %in% selected_years) %>%
+  group_by(year, coo_iso) %>%
+  summarise(total_refugees = sum(refugees, na.rm = TRUE), .groups = "drop") %>%
+  filter(!is.na(coo_iso))
+
+facet_map_data <- world_geo %>%
+  cross_join(tibble(year = selected_years)) %>%
+  left_join(refugees_selected_years, by = c("ISO_A3" = "coo_iso", "year" = "year"))
+
+ggplot() +
+  geom_sf(data = facet_map_data, aes(fill = total_refugees / 1e6), size = 0, alpha = 0.9) +
+  scale_fill_viridis_c(
+    option = "inferno",
+    trans = "log10",
+    breaks = c(0.001, 0.01, 0.1, 1, 10),
+    labels = c("1K", "10K", "100K", "1M", "10M"),
+    na.value = "grey90",
+    name = "Refugees"
+  ) +
+  facet_wrap(~year, ncol = 3) +
+  labs(
+    title = "Refugee Population by Country of Origin Over Time",
+    subtitle = "Evolution of displacement patterns from 1990 to present",
+    caption = "Data: UNHCR | Plot: Irene Pérez-Díez"
+  ) +
+  theme_void() +
+  theme(
+    text = element_text(color = "#514A44"),
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    legend.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(size = 18, hjust = 0.5, color = "#514A44", face = "bold"),
+    plot.subtitle = element_text(size = 14, hjust = 0.5, color = "#514A44"),
+    plot.caption = element_text(size = 10, color = "gray50"),
+    strip.text = element_text(size = 14, color = "#514A44", face = "bold"),
+    legend.position = "bottom"
+  ) +
+  coord_sf()
+```
+
+### Interactive Timeline Map
+
+An interactive choropleth map with a year slider allows exploration of refugee origins across all years.
+
+```{r interactive_map}
+refugees_by_year_origin <- population %>%
+  filter(year >= 1990) %>%
+  group_by(year, coo_iso, coo_name) %>%
+  summarise(total_refugees = sum(refugees, na.rm = TRUE), .groups = "drop") %>%
+  filter(!is.na(coo_iso))
+
+plot_ly(
+  data = refugees_by_year_origin,
+  type = "choropleth",
+  locations = ~coo_iso,
+  z = ~log10(total_refugees + 1),
+  frame = ~year,
+  text = ~paste(coo_name, "<br>Refugees:", scales::comma(total_refugees)),
+  hoverinfo = "text",
+  colorscale = "Inferno",
+  reversescale = TRUE,
+  zmin = 0,
+  zmax = 7,
+  colorbar = list(
+    title = "Refugees<br>(log scale)",
+    tickvals = c(0, 2, 4, 6),
+    ticktext = c("1", "100", "10K", "1M")
+  )
+) %>%
+  layout(
+    title = list(text = "Refugee Population by Country of Origin<br><sup>Use slider to explore changes over time</sup>"),
+    geo = list(
+      showframe = FALSE,
+      showcoastlines = TRUE,
+      projection = list(type = "natural earth")
+    ),
+    annotations = list(
+      list(x = 1, y = -0.05, text = "Data: UNHCR | Plot: Irene Pérez-Díez",
+           showarrow = FALSE, xref = "paper", yref = "paper",
+           xanchor = "right", font = list(size = 10, color = "gray"))
+    )
+  ) %>%
+  animation_opts(frame = 500, transition = 300, redraw = FALSE) %>%
+  animation_slider(currentvalue = list(prefix = "Year: "))
+```
+
+## Data Quality Assessment
+
+### Missing values summary
+
+```{r missing_summary}
+missing_summary <- population %>%
+  summarise(
+    refugees_na = sum(is.na(refugees)),
+    refugees_na_pct = mean(is.na(refugees)) * 100,
+    asylum_seekers_na = sum(is.na(asylum_seekers)),
+    asylum_seekers_na_pct = mean(is.na(asylum_seekers)) * 100,
+    idps_na = sum(is.na(idps)),
+    idps_na_pct = mean(is.na(idps)) * 100,
+    coo_iso_na = sum(is.na(coo_iso)),
+    coa_iso_na = sum(is.na(coa_iso))
+  )
+
+knitr::kable(
+  tibble(
+    Variable = c("refugees", "asylum_seekers", "idps", "coo_iso", "coa_iso"),
+    `Missing Count` = c(missing_summary$refugees_na, missing_summary$asylum_seekers_na,
+                        missing_summary$idps_na, missing_summary$coo_iso_na,
+                        missing_summary$coa_iso_na),
+    `Missing %` = c(missing_summary$refugees_na_pct, missing_summary$asylum_seekers_na_pct,
+                    missing_summary$idps_na_pct,
+                    missing_summary$coo_iso_na / nrow(population) * 100,
+                    missing_summary$coa_iso_na / nrow(population) * 100)
+  ),
+  caption = "Missing values in population dataset",
+  digits = 2
+)
+```
+
+### ISO code coverage
+
+```{r iso_coverage}
+iso_coverage <- population %>%
+  summarise(
+    total_records = n(),
+    has_coo_iso = sum(!is.na(coo_iso)),
+    has_coa_iso = sum(!is.na(coa_iso)),
+    has_both_iso = sum(!is.na(coo_iso) & !is.na(coa_iso))
+  ) %>%
+  mutate(
+    coo_iso_pct = has_coo_iso / total_records * 100,
+    coa_iso_pct = has_coa_iso / total_records * 100,
+    both_iso_pct = has_both_iso / total_records * 100
+  )
+
+cat("ISO code coverage for data integration:\n")
+cat(sprintf("- Origin country ISO code: %.1f%%\n", iso_coverage$coo_iso_pct))
+cat(sprintf("- Asylum country ISO code: %.1f%%\n", iso_coverage$coa_iso_pct))
+cat(sprintf("- Both ISO codes available: %.1f%%\n", iso_coverage$both_iso_pct))
+```
+
+## Summary for Integration
+
+Key findings for data integration with poverty, conflict, and water scarcity datasets:
+
+1.  **Join key**: Use `coo_iso` (origin) and `coa_iso` (asylum) ISO 3-letter codes
+2.  **Temporal range**: Data spans from 1951, but most comprehensive from 1990 onwards
+3.  **Primary metrics for analysis**:
+    -   `refugees`: Main outcome variable for migration analysis
+    -   `asylum_seekers`: Leading indicator of refugee flows
+    -   `idps`: Internal displacement (potential future refugees)
+4.  **Aggregation options**:
+    -   By origin country: Total refugees fleeing each country
+    -   By asylum country: Total refugees hosted
+    -   By origin-asylum pairs: Specific migration corridors
+
+```{r save_summary}
+integration_summary <- population %>%
+  filter(year >= 1990) %>%
+  group_by(year, coo_iso) %>%
+  summarise(
+    total_refugees = sum(refugees, na.rm = TRUE),
+    total_asylum_seekers = sum(asylum_seekers, na.rm = TRUE),
+    total_idps = sum(idps, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(!is.na(coo_iso))
+
+cat("\nIntegration-ready dataset preview:\n")
+cat(sprintf("- Rows: %d\n", nrow(integration_summary)))
+cat(sprintf("- Countries: %d\n", n_distinct(integration_summary$coo_iso)))
+cat(sprintf("- Years: %d-%d\n", min(integration_summary$year), max(integration_summary$year)))
+```
